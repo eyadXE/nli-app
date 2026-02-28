@@ -45,8 +45,92 @@ The project was developed **under the guidance of Prof. Ashraf Mohamed and Eng. 
 
 Original code (static inputs):
 
-```python
-sequence = "Hardcoded example text"
-label = "linux distro comparison"
-prob_label_is_true = classify(sequence, label)
-print(prob_label_is_true)
+Real-World Assumptions and How They Were Solved
+Problem 1: i.i.d Data → Streaming Input
+
+Theoretical assumption: The model assumes that all data points are independent and identically distributed (i.i.d.) and available in batches.
+
+Reality: Users provide text input one at a time, dynamically. The model needs to handle streaming single examples rather than large batches.
+
+How we solved it:
+
+Use Streamlit to take real-time input
+
+Model inference runs per input
+
+Added caching so the model loads only once
+
+Code Example:
+
+import streamlit as st
+from app import classify, load_model
+
+tokenizer, model, device = load_model()  # cached model load
+
+st.title("NLI Text Classifier")
+user_text = st.text_area("Enter your text:")
+label_input = st.text_input("Enter label:")
+
+if st.button("Predict"):
+    prob, label_name = classify(user_text, label_input)
+    st.write(f"Predicted label: **{label_name}**")
+    st.write(f"Probability: {prob}")
+
+Benefit: The app now handles streaming user input, not just static hardcoded examples.
+
+Problem 2: Fixed Graph → Dynamic Text and Labels
+
+Theoretical assumption: The original model was built for a fixed set of inputs and labels.
+
+Reality: Users can enter any text and any label, dynamically.
+
+How we solved it:
+
+Build hypothesis on-the-fly using user label
+
+Process input text dynamically
+
+Code Example:
+
+def classify(sequence, label):
+    premise = sequence
+    hypothesis = f"This example is {label}."  # dynamic label
+    inputs = tokenizer(
+        premise, hypothesis, return_tensors="pt", truncation=True
+    ).to(device)
+    logits = model(**inputs).logits
+    idx = torch.tensor([0, 2], device=logits.device)
+    entail_contradiction_logits = logits.index_select(1, idx)
+    probs = torch.softmax(entail_contradiction_logits, dim=1)
+    prob_label_is_true = probs[0, 1].item()
+    label_name = "Entailment" if prob_label_is_true > 0.5 else "Contradiction"
+    return round(prob_label_is_true, 2), label_name
+
+Benefit: Now supports any text and label combination, not a fixed pre-defined set.
+
+Problem 3: Full Batch Access → Real-Time Single Example Inference
+
+Theoretical assumption: The model assumes full batch access (all data in memory) for inference.
+
+Reality: The app must work per single user input in real-time without pre-loading batches.
+
+How we solved it:
+
+Removed batch processing assumption
+
+Model predicts on one input at a time
+
+Softmax and probability computation done per example
+
+Code Example:
+
+# Single example inference
+inputs = tokenizer(premise, hypothesis, return_tensors="pt", truncation=True).to(device)
+logits = model(**inputs).logits  # shape [1, 3]
+# select contradiction and entailment logits only
+idx = torch.tensor([0, 2], device=logits.device)
+entail_contradiction_logits = logits.index_select(1, idx)
+probs = torch.softmax(entail_contradiction_logits, dim=1)
+prob_label_is_true = probs[0, 1].item()
+
+Benefit: Users get real-time predictions without waiting for batch processing, making the app practical for industry usage.
